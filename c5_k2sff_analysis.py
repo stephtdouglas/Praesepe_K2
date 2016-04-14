@@ -1,9 +1,11 @@
 from __future__ import print_function, division
 import logging
 
+logging.basicConfig(level=logging.INFO)
+
 import numpy as np
 import matplotlib
-#matplotlib.use("agg")
+matplotlib.use("agg")
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 from astropy.io import fits
@@ -12,6 +14,7 @@ from scipy.signal import argrelextrema
 
 import k2spin
 from k2spin import prot
+from k2spin import detrend
 
 def k2sff_io(filename, ext):
     """ Read in a K2SFF light curve file, and return the time and flux
@@ -95,7 +98,7 @@ def run_one(t,f,epic=None):
     ls_out = prot.run_ls(t,f,np.ones_like(f),0.1,prot_lims=[0.1,70],run_bootstrap=True)
     # unpack lomb-scargle results
     fund_period, fund_power, periods_to_test, periodogram, aliases, sigmas = ls_out
-    logging.info("P=",fund_period,"Power=",fund_power)
+    logging.info("Prot={0:.3f} Power={1:.3f}".format(fund_period,fund_power))
 
 
     # Find all peaks in the periodogram
@@ -103,7 +106,7 @@ def run_one(t,f,epic=None):
     print(len(peak_locs[0]),periods_to_test[np.argmax(peak_locs[0])])
 
     # Only keep significant peaks (use bootstrap significance levels)
-    sig_locs = peak_locs[0][periodogram[peak_locs[0]]>sigmas[0]*2]
+    sig_locs = peak_locs[0][periodogram[peak_locs[0]]>sigmas[0]]
     sig_periods = periods_to_test[sig_locs]
     sig_powers = periodogram[sig_locs]
 
@@ -121,8 +124,17 @@ def run_one(t,f,epic=None):
         most_significant = np.argmax(sig_powers)
         most_sig_period = sig_periods[most_significant]
         most_sig_power = sig_powers[most_significant]
+        if len(sig_locs)>1:
+            trim_periods = np.delete(sig_periods, most_significant)
+            trim_powers = np.delete(sig_powers, most_significant)
+            second_significant = np.argmax(trim_powers)
+            sec_period = trim_periods[second_significant]
+            sec_power = trim_powers[second_significant]
+        else:
+            sec_period, sec_power = -9999, -9999
     else:
         most_sig_period, most_sig_power = -9999,-9999
+        sec_period, sec_power = -9999, -9999
 
     # plot phase-folded periods
     num_cols = np.int(np.ceil((len(sig_periods)+1) / 2))
@@ -154,9 +166,10 @@ def run_one(t,f,epic=None):
 
     plt.subplots_adjust(hspace=0.25)
 
-    return fund_period, fund_power, most_sig_period, most_sig_power, sigmas[0]
+    return (fund_period, fund_power, most_sig_period, most_sig_power, 
+            sec_period, sec_power, sigmas[0])
 
-def run_list(list_filenames,output_filename,plot_dir):
+def run_list(list_filenames,output_filename,data_dir,plot_dir):
     """ Run a list of K2SFF files through run_one(), and save results.
 
     Inputs:
@@ -164,6 +177,8 @@ def run_list(list_filenames,output_filename,plot_dir):
     list_filenames: list or array of filename strings
 
     output_filenames: string, giving the output filename for a table of results
+
+    data_dir: directory that contains the data files
 
     plot_dir: directory to save plots in
 
@@ -174,6 +189,8 @@ def run_list(list_filenames,output_filename,plot_dir):
     fund_powers = np.zeros(n_files)
     sig_periods = np.zeros(n_files)
     sig_powers = np.zeros(n_files)
+    sec_periods = np.zeros(n_files)
+    sec_powers = np.zeros(n_files)
     thresholds = np.zeros(n_files)
     epics = np.zeros(n_files,np.int64)
 
@@ -181,52 +198,86 @@ def run_list(list_filenames,output_filename,plot_dir):
         epic = filename.split("/")[0].split("-")[0].split("_")[-1]
 
         # Retrieve light curve and run lomb-scargle analysis on it
-        time,flux = k2sff_io(filename,"best")
-        one_out = run_one(t,f,epic)
+#        try:
+        time,flux = k2sff_io(data_dir+filename,"best")
+        one_out = run_one(time,flux,epic)
+
+#        white_flux, w_unc, trend = detrend.pre_whiten(time,flux,np.ones_like(flux),
+#                                                      period=0, kind="supersmoother",
+#                                                      which="full",phaser=10)
+#        one_out = run_one(time,white_flux,epic)
+
+#        except:
+#            continue
 
         # Unpack analysis results
-        fund_periods[i],fund_powers[i] = one_out[:2]
-        sig_periods[i],sig_powers[i],thresholds[i] = one_out[2:]
-        epics[i] = epics
+        fund_periods[i],fund_powers[i],sig_periods[i] = one_out[:3]
+        sig_powers[i],sec_periods[i],sec_powers[i],thresholds[i] = one_out[3:]
+        epics[i] = epic
 
         # Save and close the plot files
         plt.savefig("{0}EPIC{1}_lstest.png".format(plot_dir,epic),
                     bbox_inches="tight")
         plt.close()
 
-    data = {"filename": list_filenames,
-            "EPIC": epics,
+#        plt.figure(figsize=(7,3))
+#        plt.plot(time,flux,'k.')
+#        plt.plot(time,trend,'c-',lw=2)
+#        plt.savefig("{0}EPIC{1}_detrend.png".format(plot_dir,epic),
+#                    bbox_inches="tight")
+#        plt.close()
+
+
+        if i>=5:
+            break
+
+    data = {"EPIC": epics,
             "fund_period": fund_periods,
             "fund_power": fund_powers,
             "sig_period": sig_periods,
             "sig_power": sig_powers,
+            "sec_period": sec_periods,
+            "sec_power": sec_powers,
             "threshold": thresholds}
     formats = {
             "fund_period": "%0.4f",
             "fund_power": "%0.4f",
             "sig_period": "%0.4f",
             "sig_power": "%0.4f",
+            "sec_period": "%0.4f",
+            "sec_power": "%0.4f",
             "threshold": "%0.6f"}
 
-    names = ["filename","EPIC","fund_period","fund_power",
-            "sig_period","sig_power","threshold"]
+    names = ["EPIC","fund_period","fund_power",
+            "sig_period","sig_power","sec_period","sec_power",
+            "threshold"]
 
     at.write(data,output_filename,names=names,
-             formats=formats)
+             formats=formats,delimiter=",")
 
 if __name__=="__main__":
 
     logging.basicConfig(level=logging.INFO)
 
-    base_path = "/home/stephanie/projects/praesepe/"
-    data_path = "/home/stephanie/data/c5_k2sff/"
-    plot_path = base_path+"k2_plots/"
+#    base_path = "/home/stephanie/projects/praesepe/"
+#    data_path = "/home/stephanie/data/c5_k2sff/"
+#    plot_path = base_path+"k2_plots/"
+    base_path = "/vega/astro/users/sd2706/k2/"
+    data_path = base_path+"data/"
+    plot_path = base_path+"c5_plots/"
 
-    epic = 211748286
-    test_file = "hlsp_k2sff_k2_lightcurve_{0}-c05_kepler_v1_llc.fits".format(epic)
+#    epic = 211748286
+#    test_file = "hlsp_k2sff_k2_lightcurve_{0}-c05_kepler_v1_llc.fits".format(epic)
 
-    t,f = k2sff_io(data_path+test_file,1)
-    run_one(t,f,epic)
-    plt.savefig("{0}EPIC{1}_lstest.png".format(plot_path,epic),
-                bbox_inches="tight")
-    plt.close()
+#    t,f = k2sff_io(data_path+test_file,1)
+#    run_one(t,f,epic)
+#    plt.savefig("{0}EPIC{1}_lstest.png".format(plot_path,epic),
+#                bbox_inches="tight")
+#    plt.close()
+
+    list_file = base_path+"data/test_k2sff_files.lst"
+    test_list = at.read(list_file)
+#    print(test_list)
+
+    test_outfile = "c5_tables/k2_k2sff_test_output.csv"
+    run_list(test_list["filename"],base_path+test_outfile,data_path,plot_path)
