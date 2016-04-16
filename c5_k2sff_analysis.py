@@ -1,7 +1,9 @@
 from __future__ import print_function, division
+from datetime import date
 import logging
+import pickle
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.WARNING)
 
 import numpy as np
 import matplotlib
@@ -118,13 +120,15 @@ def run_one(t,f,epic=None):
     ax.set_xscale("log")
     ax.set_xlim(0.1,70)
     # Mark significant peaks (if any) on the periodogram
-    if len(sig_locs)>0:
+    num_sig = len(sig_locs)
+
+    if num_sig>0:
         plt.plot(sig_periods,sig_powers*1.1,'kv')
         # What's the most powerful of the significant peaks?
         most_significant = np.argmax(sig_powers)
         most_sig_period = sig_periods[most_significant]
         most_sig_power = sig_powers[most_significant]
-        if len(sig_locs)>1:
+        if num_sig>1:
             trim_periods = np.delete(sig_periods, most_significant)
             trim_powers = np.delete(sig_powers, most_significant)
             second_significant = np.argmax(trim_powers)
@@ -135,6 +139,31 @@ def run_one(t,f,epic=None):
     else:
         most_sig_period, most_sig_power = -9999,-9999
         sec_period, sec_power = -9999, -9999
+
+    # Count the number of significant periods besides the first
+    # A likely harmonic doesn't count against this
+    extra_sig = 0
+
+    # Record type of potential harmonic, if applicable
+    harm_type = "-"
+
+    if num_sig>1:
+        # Compare the two most significant periods
+        period_ratio = sec_period / most_sig_period
+        power_ratio = sec_power / most_sig_power
+
+        # Is the secondary peak a 1/2 or 2x harmonic?
+        if abs(period_ratio-0.5)<=0.05:
+            harm_type = "half"
+            extra_sig = num_sig - 2
+        elif abs(period_ratio-2.0)<=0.05:
+            harm_type = "dbl"
+            extra_sig = num_sig - 2
+        else:
+            extra_sig = num_sig-1
+
+        if (harm_type!="-") and (power_ratio>0.5):
+            harm_type = harm_type+"-maybe"
 
     # plot phase-folded periods
     num_cols = np.int(np.ceil((len(sig_periods)+1) / 2))
@@ -167,7 +196,7 @@ def run_one(t,f,epic=None):
     plt.subplots_adjust(hspace=0.25)
 
     return (fund_period, fund_power, most_sig_period, most_sig_power, 
-            sec_period, sec_power, sigmas[0])
+            sec_period, sec_power, sigmas[0], extra_sig, harm_type)
 
 def run_list(list_filenames,output_filename,data_dir,plot_dir):
     """ Run a list of K2SFF files through run_one(), and save results.
@@ -193,6 +222,9 @@ def run_list(list_filenames,output_filename,data_dir,plot_dir):
     sec_powers = np.zeros(n_files)
     thresholds = np.zeros(n_files)
     epics = np.zeros(n_files,np.int64)
+    num_sig_peaks = np.zeros(n_files,int)
+    harm_types = np.empty(n_files,"S10")
+    harm_types[:] = "-"
 
     for i,filename in enumerate(list_filenames):
         epic = filename.split("/")[0].split("-")[0].split("_")[-1]
@@ -212,7 +244,8 @@ def run_list(list_filenames,output_filename,data_dir,plot_dir):
 
         # Unpack analysis results
         fund_periods[i],fund_powers[i],sig_periods[i] = one_out[:3]
-        sig_powers[i],sec_periods[i],sec_powers[i],thresholds[i] = one_out[3:]
+        sig_powers[i],sec_periods[i],sec_powers[i],thresholds[i] = one_out[3:7]
+        num_sig_peaks[i],harm_types[i] = one_out[7:]
         epics[i] = epic
 
         # Save and close the plot files
@@ -228,8 +261,8 @@ def run_list(list_filenames,output_filename,data_dir,plot_dir):
 #        plt.close()
 
 
-        if i>=5:
-            break
+#        if i>=10:
+#            break
 
     data = {"EPIC": epics,
             "fund_period": fund_periods,
@@ -238,7 +271,9 @@ def run_list(list_filenames,output_filename,data_dir,plot_dir):
             "sig_power": sig_powers,
             "sec_period": sec_periods,
             "sec_power": sec_powers,
-            "threshold": thresholds}
+            "threshold": thresholds,
+            "num_sig": num_sig_peaks,
+            "harm_type": harm_types}
     formats = {
             "fund_period": "%0.4f",
             "fund_power": "%0.4f",
@@ -250,14 +285,19 @@ def run_list(list_filenames,output_filename,data_dir,plot_dir):
 
     names = ["EPIC","fund_period","fund_power",
             "sig_period","sig_power","sec_period","sec_power",
-            "threshold"]
+            "num_sig","harm_type","threshold"]
+
+    pickle_file = open(output_filename.replace(".csv",".pkl"),"wb")
+    pickle.dump(data,pickle_file)
+    pickle_file.close()
 
     at.write(data,output_filename,names=names,
              formats=formats,delimiter=",")
 
 if __name__=="__main__":
 
-    logging.basicConfig(level=logging.INFO)
+    today = date.isoformat(date.today())
+#    logging.basicConfig(level=logging.INFO)
 
 #    base_path = "/home/stephanie/projects/praesepe/"
 #    data_path = "/home/stephanie/data/c5_k2sff/"
@@ -275,9 +315,10 @@ if __name__=="__main__":
 #                bbox_inches="tight")
 #    plt.close()
 
-    list_file = base_path+"data/test_k2sff_files.lst"
+#    list_file = base_path+"data/test_k2sff_files.lst"
+    list_file = base_path+"data/all_k2sff_files.lst"
     test_list = at.read(list_file)
 #    print(test_list)
 
-    test_outfile = "c5_tables/k2_k2sff_test_output.csv"
-    run_list(test_list["filename"],base_path+test_outfile,data_path,plot_path)
+    outfile = "c5_tables/c5_k2sff_output_{0}.csv".format(today)
+    run_list(test_list["filename"],base_path+outfile,data_path,plot_path)
