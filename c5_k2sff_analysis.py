@@ -57,6 +57,29 @@ def k2sff_io(filename, ext):
     hdu.close()
     return time,flux
 
+def choose_initial_k2sff(filename):
+    """ Select which aperture from the K2SFF file to use by picking the
+    light curve with the highest periodogram peak <35 days.
+    (BESTAPER frequently includes a long-term trend that shouldn't dominate.)"""
+
+    peak_power = np.zeros(21)
+    peak_periods = np.zeros(21)
+    with fits.open(filename) as hdu:
+        for ext in np.arange(2,21,1):
+            table = hdu[ext].data
+            t = table["T"][table["MOVING"]==0]
+            f = table["FCOR"][table["MOVING"]==0]
+
+            ls_out = prot.run_ls(t,f,np.ones_like(f),0.1,prot_lims=[0.1,35],
+                                 run_bootstrap=False)
+            fund_period, fund_power, periods_to_test, periodogram, _, _ = ls_out
+
+            peak_periods[ext] = periods_to_test[np.argmax(periodogram)]
+            peak_power[ext] = max(periodogram)
+
+    best_ext = np.arange(2,21,1)[np.argmax(peak_power)]
+    return best_ext
+
 def run_one(t,f,epic=None):
     """Run a lomb-scargle analysis on one light curve.
 
@@ -97,7 +120,8 @@ def run_one(t,f,epic=None):
     ax.set_ylim(ylims)
 
     # Run the lomb-scargle periodogram on the light curve
-    ls_out = prot.run_ls(t,f,np.ones_like(f),0.1,prot_lims=[0.1,70],run_bootstrap=True)
+    ls_out = prot.run_ls(t,f,np.ones_like(f),0.1,prot_lims=[0.1,70],
+                         run_bootstrap=True)
     # unpack lomb-scargle results
     fund_period, fund_power, periods_to_test, periodogram, aliases, sigmas = ls_out
     logging.info("Prot={0:.3f} Power={1:.3f}".format(fund_period,fund_power))
@@ -229,18 +253,9 @@ def run_list(list_filenames,output_filename,data_dir,plot_dir):
     for i,filename in enumerate(list_filenames):
         epic = filename.split("/")[0].split("-")[0].split("_")[-1]
 
-        # Retrieve light curve and run lomb-scargle analysis on it
-#        try:
-        time,flux = k2sff_io(data_dir+filename,"best")
+        best_ext = choose_initial_k2sff(data_dir+filename)
+        time,flux = k2sff_io(data_dir+filename,best_ext)
         one_out = run_one(time,flux,epic)
-
-#        white_flux, w_unc, trend = detrend.pre_whiten(time,flux,np.ones_like(flux),
-#                                                      period=0, kind="supersmoother",
-#                                                      which="full",phaser=10)
-#        one_out = run_one(time,white_flux,epic)
-
-#        except:
-#            continue
 
         # Unpack analysis results
         fund_periods[i],fund_powers[i],sig_periods[i] = one_out[:3]
@@ -253,16 +268,8 @@ def run_list(list_filenames,output_filename,data_dir,plot_dir):
                     bbox_inches="tight")
         plt.close()
 
-#        plt.figure(figsize=(7,3))
-#        plt.plot(time,flux,'k.')
-#        plt.plot(time,trend,'c-',lw=2)
-#        plt.savefig("{0}EPIC{1}_detrend.png".format(plot_dir,epic),
-#                    bbox_inches="tight")
-#        plt.close()
-
-
-#        if i>=10:
-#            break
+        if i>=10:
+            break
 
     data = {"EPIC": epics,
             "fund_period": fund_periods,
@@ -293,7 +300,7 @@ def run_list(list_filenames,output_filename,data_dir,plot_dir):
 
     at.write(data,output_filename,names=names,
              formats=formats,delimiter=",")
-             
+
 if __name__=="__main__":
 
     today = date.isoformat(date.today())
