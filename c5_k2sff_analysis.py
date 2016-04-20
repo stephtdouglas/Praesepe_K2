@@ -293,90 +293,7 @@ def run_list(list_filenames,output_filename,data_dir,plot_dir):
 
     at.write(data,output_filename,names=names,
              formats=formats,delimiter=",")
-
-def run_sysremed_list(list_filenames,output_filename,data_dir,plot_dir):
-    """ Run a list of sysremed K2SFF files through run_one(),
-    and save results.
-
-    Inputs:
-    -------
-    list_filenames: list or array of filename strings
-
-    output_filenames: string, giving the output filename for a table of results
-
-    data_dir: directory that contains the data files
-
-    plot_dir: directory to save plots in
-
-    """
-
-    n_files = len(list_filenames)
-    fund_periods = np.zeros(n_files)
-    fund_powers = np.zeros(n_files)
-    sig_periods = np.zeros(n_files)
-    sig_powers = np.zeros(n_files)
-    sec_periods = np.zeros(n_files)
-    sec_powers = np.zeros(n_files)
-    thresholds = np.zeros(n_files)
-    epics = np.zeros(n_files,np.int64)
-    num_sig_peaks = np.zeros(n_files,int)
-    harm_types = np.empty(n_files,"S10")
-    harm_types[:] = "-"
-
-    for i,filename in enumerate(list_filenames):
-        epic = filename.split("/")[0].split("-")[0].split("_")[-1]
-
-        lcfile = at.read(data_dir+filename)
-        time = lcfile["epochs"][lcfile["flags"]==0]
-        flux = lcfile["mags"][lcfile["flags"]==0]
-
-        one_out = run_one(time,flux,epic)
-
-        # Unpack analysis results
-        fund_periods[i],fund_powers[i],sig_periods[i] = one_out[:3]
-        sig_powers[i],sec_periods[i],sec_powers[i],thresholds[i] = one_out[3:7]
-        num_sig_peaks[i],harm_types[i] = one_out[7:]
-        epics[i] = epic
-
-        # Save and close the plot files
-        plt.savefig("{0}EPIC{1}_sysrem_lstest.png".format(plot_dir,epic),
-                    bbox_inches="tight")
-        plt.close()
-
-        # if i>=3:
-        #     break
-
-    data = {"EPIC": epics,
-            "fund_period": fund_periods,
-            "fund_power": fund_powers,
-            "sig_period": sig_periods,
-            "sig_power": sig_powers,
-            "sec_period": sec_periods,
-            "sec_power": sec_powers,
-            "threshold": thresholds,
-            "num_sig": num_sig_peaks,
-            "harm_type": harm_types}
-    formats = {
-            "fund_period": "%0.4f",
-            "fund_power": "%0.4f",
-            "sig_period": "%0.4f",
-            "sig_power": "%0.4f",
-            "sec_period": "%0.4f",
-            "sec_power": "%0.4f",
-            "threshold": "%0.6f"}
-
-    names = ["EPIC","fund_period","fund_power",
-            "sig_period","sig_power","sec_period","sec_power",
-            "num_sig","harm_type","threshold"]
-
-    pickle_file = open(output_filename.replace(".csv",".pkl"),"wb")
-    pickle.dump(data,pickle_file)
-    pickle_file.close()
-
-    at.write(data,output_filename,names=names,
-             formats=formats,delimiter=",")
-
-
+             
 if __name__=="__main__":
 
     today = date.isoformat(date.today())
@@ -403,9 +320,5 @@ if __name__=="__main__":
 #    test_list = at.read(list_file)
 #    print(test_list)
 
-#    outfile = "c5_tables/c5_k2sff_output_{0}.csv".format(today)
-#    run_list(test_list["filename"],base_path+outfile,data_path,plot_path)
-
-    sysrem_list = at.read(data_path+"sysrem_ch46.lst")
-    outfile = "k2_tables/c5_k2sff_output_{0}.csv".format(today)
-    run_sysremed_list(sysrem_list["filename"],base_path+outfile,data_path+"channel_46/",plot_path)
+    outfile = "c5_tables/c5_k2sff_output_{0}.csv".format(today)
+    run_list(test_list["filename"],base_path+outfile,data_path,plot_path)
