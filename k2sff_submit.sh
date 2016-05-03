@@ -1,9 +1,9 @@
 #!/bin/sh
 
 # Directives
-#PBS -N K2SFF_TEST
+#PBS -N K2SFF
 #PBS -W group_list=yetiastro
-#PBS -l nodes=1,walltime=24:00:00,mem=16000mb
+#PBS -l nodes=1,walltime=24:00:00,mem=4000mb
 #PBS -M sd2706@columbia.edu 
 #PBS -m abe
 #PBS -V

@@ -1,5 +1,6 @@
 from __future__ import print_function, division
 from datetime import date
+import os
 import logging
 import pickle
 
@@ -62,22 +63,24 @@ def choose_initial_k2sff(filename):
     light curve with the highest periodogram peak <35 days.
     (BESTAPER frequently includes a long-term trend that shouldn't dominate.)"""
 
-    peak_power = np.zeros(21)
-    peak_periods = np.zeros(21)
+    extensions = np.arange(2,21,1)
+    next = len(extensions)
+    peak_power = np.zeros(next)
+    peak_periods = np.zeros(next)
     with fits.open(filename) as hdu:
-        for ext in np.arange(2,21,1):
+        for i, ext in enumerate(extensions):
             table = hdu[ext].data
             t = table["T"][table["MOVING"]==0]
             f = table["FCOR"][table["MOVING"]==0]
 
-            ls_out = prot.run_ls(t,f,np.ones_like(f),0.1,prot_lims=[0.1,35],
+            ls_out = prot.run_ls(t,f,np.ones_like(f),0.1,prot_lims=[0.1,30],
                                  run_bootstrap=False)
             fund_period, fund_power, periods_to_test, periodogram, _, _ = ls_out
 
-            peak_periods[ext] = periods_to_test[np.argmax(periodogram)]
-            peak_power[ext] = max(periodogram)
+            peak_periods[i] = periods_to_test[np.argmax(periodogram)]
+            peak_power[i] = max(periodogram)
 
-    best_ext = np.arange(2,21,1)[np.argmax(peak_power)]
+    best_ext = extensions[np.argmax(peak_power)]
     return best_ext
 
 def run_one(t,f,epic=None):
@@ -129,10 +132,12 @@ def run_one(t,f,epic=None):
 
     # Find all peaks in the periodogram
     peak_locs = argrelextrema(periodogram,np.greater,order=100)
-    print(len(peak_locs[0]),periods_to_test[np.argmax(peak_locs[0])])
+    peak_locs = peak_locs[0]
+    print(len(peak_locs),periods_to_test[np.argmax(peak_locs)])
 
     # Only keep significant peaks (use bootstrap significance levels)
-    sig_locs = peak_locs[0][periodogram[peak_locs[0]]>sigmas[0]]
+    sig_locs = peak_locs[(periodogram[peak_locs]>sigmas[0]) & 
+                         (periods_to_test[peak_locs]<35)]
     sig_periods = periods_to_test[sig_locs]
     sig_powers = periodogram[sig_locs]
 
@@ -268,8 +273,8 @@ def run_list(list_filenames,output_filename,data_dir,plot_dir):
                     bbox_inches="tight")
         plt.close()
 
-        if i>=10:
-            break
+#        if i>=3:
+#            break
 
     data = {"EPIC": epics,
             "fund_period": fund_periods,
@@ -305,13 +310,25 @@ if __name__=="__main__":
 
     today = date.isoformat(date.today())
 #    logging.basicConfig(level=logging.INFO)
+    arrayid = int(os.getenv("PBS_ARRAYID",0))
 
-    base_path = "/home/stephanie/projects/praesepe/"
-    data_path = "/home/stephanie/data/c5_k2sff/"
-    plot_path = base_path+"k2_plots/"
-    # base_path = "/vega/astro/users/sd2706/k2/"
-    # data_path = base_path+"data/"
-    # plot_path = base_path+"c5_plots/"
+    mini = (arrayid - 1) * 50
+    if arrayid==0:
+        mini = 0
+        maxi = 698
+    elif arrayid==4:
+        # We only have 699 stars
+        maxi = mini + 49
+    else:
+        maxi = mini + 50
+    print(arrayid, mini, maxi)
+
+#    base_path = "/home/stephanie/projects/praesepe/"
+#    data_path = "/home/stephanie/data/c5_k2sff/"
+#    plot_path = base_path+"k2_plots/"
+    base_path = "/vega/astro/users/sd2706/k2/"
+    data_path = base_path+"data/"
+    plot_path = base_path+"c5_plots/"
 
 #    epic = 211748286
 #    test_file = "hlsp_k2sff_k2_lightcurve_{0}-c05_kepler_v1_llc.fits".format(epic)
@@ -323,9 +340,9 @@ if __name__=="__main__":
 #    plt.close()
 
 #    list_file = base_path+"data/test_k2sff_files.lst"
-#    list_file = base_path+"data/all_k2sff_files.lst"
-#    test_list = at.read(list_file)
+    list_file = base_path+"data/all_k2sff_files.lst"
+    test_list = at.read(list_file)
 #    print(test_list)
 
-    outfile = "c5_tables/c5_k2sff_output_{0}.csv".format(today)
+    outfile = "c5_tables/c5_k2sff_output_{0}_array{1}.csv".format(today,arrayid)
     run_list(test_list["filename"],base_path+outfile,data_path,plot_path)
