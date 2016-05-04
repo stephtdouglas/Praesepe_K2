@@ -1,4 +1,5 @@
 from __future__ import print_function, division
+import sys, os
 from datetime import date
 import logging
 import pickle
@@ -284,8 +285,10 @@ def run_list(list_filenames,output_filename,data_dir,plot_dir):
         if "k2sff" in filename:
             best_ext = choose_initial_k2sff(data_dir+filename)
             time,flux = k2sff_io(data_dir+filename,best_ext)
+            lc_type = "k2sff"
         elif "k2sc" in filename:
-            time,flux = k2sc_io(data_dir+filename,best_ext)
+            time,flux = k2sc_io(data_dir+filename)
+            lc_type = "k2sc"
         one_out = run_one(time,flux,epic)
 
         # Unpack analysis results
@@ -295,12 +298,12 @@ def run_list(list_filenames,output_filename,data_dir,plot_dir):
         epics[i] = epic
 
         # Save and close the plot files
-        plt.savefig("{0}EPIC{1}_lstest.png".format(plot_dir,epic),
+        plt.savefig("{0}EPIC{1}_{2}.png".format(plot_dir,epic,lc_type),
                     bbox_inches="tight")
         plt.close()
 
-        if i>=10:
-            break
+#        if i>=0:
+#            break
 
     data = {"EPIC": epics,
             "fund_period": fund_periods,
@@ -337,16 +340,34 @@ if __name__=="__main__":
     today = date.isoformat(date.today())
 #    logging.basicConfig(level=logging.INFO)
 
+    # Retrieve the input list
     if len(sys.argv)==1:
         print("Please provide a list of light curve files")
     else:
         listfile = at.read(sys.argv[1])
         file_list = listfile["filename"]
 
-    if len(sys.arv>2):
-        outfile = sys.argv[2]
+    if len(sys.argv)>2:
+        outfile0 = sys.argv[2]
+        outfile = "{0}_{1}.csv".format(outfile0[:-4],today)
     else:
         outfile = "c5_tables/c5_output_{0}.csv".format(today)
+
+    # Break down the data set into subsets for parallel processing
+    arrayid = int(os.getenv("PBS_ARRAYID",0))
+
+    mini = (arrayid - 1) * 50
+    maxi = min(mini + 50, len(file_list))
+    if arrayid==0:
+        mini = 0
+        maxi = len(file_list)
+    else:
+        outfile = outfile.replace(".csv","_{0}.csv".format(arrayid))
+
+    print("Array, min(i), max(i)")
+    print(arrayid, mini, maxi)
+
+    sub_list = file_list[mini:maxi]
 
     # base_path = "/home/stephanie/projects/praesepe/"
     # data_path = "/home/stephanie/data/c5_k2sc/"
@@ -367,6 +388,6 @@ if __name__=="__main__":
 #    list_file = base_path+"data/test_k2sff_files.lst"
 #    list_file = base_path+"data/all_k2sff_files.lst"
 #    test_list = at.read(list_file)
-#    print(test_list)
+    print(sub_list)
 
-    run_list(file_list,base_path+outfile,data_path,plot_path)
+    run_list(sub_list,base_path+outfile,data_path,plot_path)
