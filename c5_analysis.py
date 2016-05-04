@@ -57,6 +57,34 @@ def k2sff_io(filename, ext):
     hdu.close()
     return time,flux
 
+def k2sc_io(filename):
+    """ Read in a K2SC light curve file, and return the time and flux.
+
+    Flux is calculated as the completely detrended flux plus the
+    time-dependent trend (i.e., only the position-dependent trend is removed),
+    and then normalized.
+
+    Inputs
+    ------
+    filename: string
+        a valid K2SC file, including full or relative path
+
+    Returns:
+    --------
+    time, flux: arrays
+
+    """
+    with fits.open(filename) as hdu:
+        #print(hdu.info())
+
+        table = hdu[1].data
+        good = np.isfinite(table["flux"]) & (np.isfinite(table["trend_t"]))
+        med_trend = np.median(table["trend_t"][good])
+        time = table["time"][good]
+        flux = table["flux"][good] + table["trend_t"][good] - med_trend
+
+    return time,flux
+
 def choose_initial_k2sff(filename):
     """ Select which aperture from the K2SFF file to use by picking the
     light curve with the highest periodogram peak <35 days.
@@ -223,7 +251,7 @@ def run_one(t,f,epic=None):
             sec_period, sec_power, sigmas[0], extra_sig, harm_type)
 
 def run_list(list_filenames,output_filename,data_dir,plot_dir):
-    """ Run a list of K2SFF files through run_one(), and save results.
+    """ Run a list of K2SFF or K2SC files through run_one(), and save results.
 
     Inputs:
     -------
@@ -253,8 +281,11 @@ def run_list(list_filenames,output_filename,data_dir,plot_dir):
     for i,filename in enumerate(list_filenames):
         epic = filename.split("/")[0].split("-")[0].split("_")[-1]
 
-        best_ext = choose_initial_k2sff(data_dir+filename)
-        time,flux = k2sff_io(data_dir+filename,best_ext)
+        if "k2sff" in filename:
+            best_ext = choose_initial_k2sff(data_dir+filename)
+            time,flux = k2sff_io(data_dir+filename,best_ext)
+        elif "k2sc" in filename:
+            time,flux = k2sc_io(data_dir+filename,best_ext)
         one_out = run_one(time,flux,epic)
 
         # Unpack analysis results
@@ -306,12 +337,23 @@ if __name__=="__main__":
     today = date.isoformat(date.today())
 #    logging.basicConfig(level=logging.INFO)
 
-    base_path = "/home/stephanie/projects/praesepe/"
-    data_path = "/home/stephanie/data/c5_k2sff/"
-    plot_path = base_path+"k2_plots/"
-    # base_path = "/vega/astro/users/sd2706/k2/"
-    # data_path = base_path+"data/"
-    # plot_path = base_path+"c5_plots/"
+    if len(sys.argv)==1:
+        print("Please provide a list of light curve files")
+    else:
+        listfile = at.read(sys.argv[1])
+        file_list = listfile["filename"]
+
+    if len(sys.arv>2):
+        outfile = sys.argv[2]
+    else:
+        outfile = "c5_tables/c5_output_{0}.csv".format(today)
+
+    # base_path = "/home/stephanie/projects/praesepe/"
+    # data_path = "/home/stephanie/data/c5_k2sc/"
+    # plot_path = base_path+"k2_plots/"
+    base_path = "/vega/astro/users/sd2706/k2/"
+    data_path = base_path+"data/"
+    plot_path = base_path+"c5_plots/"
 
 #    epic = 211748286
 #    test_file = "hlsp_k2sff_k2_lightcurve_{0}-c05_kepler_v1_llc.fits".format(epic)
@@ -327,5 +369,4 @@ if __name__=="__main__":
 #    test_list = at.read(list_file)
 #    print(test_list)
 
-    outfile = "c5_tables/c5_k2sff_output_{0}.csv".format(today)
-    run_list(test_list["filename"],base_path+outfile,data_path,plot_path)
+    run_list(file_list,base_path+outfile,data_path,plot_path)
