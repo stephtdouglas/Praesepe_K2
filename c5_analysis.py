@@ -109,7 +109,7 @@ def choose_initial_k2sff(filename):
     best_ext = np.arange(2,21,1)[np.argmax(peak_power)]
     return best_ext
 
-def run_one(t,f,epic=None):
+def run_one(t,f,epic=None,secondary_file=None):
     """Run a lomb-scargle analysis on one light curve.
 
     Inputs:
@@ -181,6 +181,8 @@ def run_one(t,f,epic=None):
         most_significant = np.argmax(sig_powers)
         most_sig_period = sig_periods[most_significant]
         most_sig_power = sig_powers[most_significant]
+
+        # If there are two or more, also record the second one
         if num_sig>1:
             trim_periods = np.delete(sig_periods, most_significant)
             trim_powers = np.delete(sig_powers, most_significant)
@@ -189,6 +191,13 @@ def run_one(t,f,epic=None):
             sec_power = trim_powers[second_significant]
         else:
             sec_period, sec_power = -9999, -9999
+
+        # Record all secondary peaks, just in case
+        if secondary_file is not None:
+            for i in range(num_sig):
+                secondary_file.write("{0},{1:.4f},{2:.4f},{3:.4f}\n".format(epic,
+                                     sig_periods[i],sig_powers[i],sigmas[0]))
+
     else:
         most_sig_period, most_sig_power = -9999,-9999
         sec_period, sec_power = -9999, -9999
@@ -279,6 +288,10 @@ def run_list(list_filenames,output_filename,data_dir,plot_dir):
     harm_types = np.empty(n_files,"S10")
     harm_types[:] = "-"
 
+    sec_filename = output_filename.replace(".csv","_allpeaks.csv")
+    sec_file = open(sec_filename,"w")
+    sec_file.write("EPIC,period,power,threshold\n")
+
     for i,filename in enumerate(list_filenames):
         epic = filename.split("/")[0].split("-")[0].split("_")[-1]
 
@@ -289,7 +302,7 @@ def run_list(list_filenames,output_filename,data_dir,plot_dir):
         elif "k2sc" in filename:
             time,flux = k2sc_io(data_dir+filename)
             lc_type = "k2sc"
-        one_out = run_one(time,flux,epic)
+        one_out = run_one(time,flux,epic,sec_file)
 
         # Unpack analysis results
         fund_periods[i],fund_powers[i],sig_periods[i] = one_out[:3]
@@ -302,8 +315,10 @@ def run_list(list_filenames,output_filename,data_dir,plot_dir):
                     bbox_inches="tight")
         plt.close()
 
-#        if i>=0:
+#        if i>=3:
 #            break
+
+    sec_file.close()
 
     data = {"EPIC": epics,
             "fund_period": fund_periods,
